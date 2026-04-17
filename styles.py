@@ -153,6 +153,26 @@ def apply_styles():
         button[title="Metrics Info"]:hover p {
             color: #555 !important;
         }
+
+        /* Center Dashboard Radio Toggle */
+        div[data-testid="stSlider"] {
+            padding-bottom: 20px !important;
+        }
+        
+        div[data-testid="stSlider"] label {
+            color: #008080 !important;
+            font-weight: 500 !important;
+        }
+
+        /* Styling for the selector handles and tracks */
+        div[data-baseweb="slider"] > div > div {
+            background: #008080 !important;
+        }
+        
+        div[role="slider"] {
+            border-color: #008080 !important;
+            background-color: #FDFBF7 !important;
+        }
         </style>
     """, unsafe_allow_html=True)
 

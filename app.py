@@ -230,7 +230,26 @@ elif st.session_state.page == 'dashboard':
                 st.markdown(f"<p style='text-align:center; font-size:0.7rem; margin-top:-5px;'>{d.day}</p>", unsafe_allow_html=True)
 
     st.markdown(f"<h4 style='text-align:center;'>{st.session_state.selected_date.strftime('%b %d, %Y')}</h4>", unsafe_allow_html=True)
+    
+    # Graph Range Selector
+    graph_range = st.select_slider(
+        "Select Range",
+        options=["Weekly", "Monthly", "All Time"],
+        value="Weekly",
+        label_visibility="collapsed",
+        key="graph_range"
+    )
+    
     df_w = get_health_logs(user_id, 'weight')
+    
+    if not df_w.empty:
+        # Filter based on range
+        today = date.today()
+        if graph_range == "Weekly":
+            df_w = df_w[df_w['log_date'].dt.date >= (today - timedelta(days=7))]
+        elif graph_range == "Monthly":
+            df_w = df_w[df_w['log_date'].dt.date >= (today - timedelta(days=30))]
+            
     fig = go.Figure()
     if not df_w.empty:
         # Sort by date for proper line connection
