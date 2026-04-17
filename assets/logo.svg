@@ -1,0 +1,17 @@
+<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+    <!-- Background Circle -->
+    <circle cx="100" cy="100" r="80" fill="#f0f9f8" />
+    
+    <!-- Circadian Loop (Sun to Moon) -->
+    <path d="M 40 100 A 60 60 0 1 1 160 100" fill="none" stroke="#20B2AA" stroke-width="2" stroke-dasharray="4 4"/>
+    <path d="M 40 100 A 60 60 0 0 0 160 100" fill="none" stroke="#008080" stroke-width="2"/>
+    
+    <!-- Sun & Moon minimal accents -->
+    <circle cx="100" cy="35" r="4" fill="#20B2AA" />
+    <path d="M 97 165 A 6 6 0 1 0 103 165 A 4 4 0 1 1 97 165" fill="#008080" />
+
+    <!-- Text -->
+    <text x="100" y="112" font-family="'Playfair Display', serif" font-size="42" font-style="italic" fill="#006666" text-anchor="middle">rta</text>
+    <!-- Custom dot under 'r' -->
+    <circle cx="81" cy="120" r="2.5" fill="#006666" />
+</svg>
