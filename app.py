@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 from datetime import datetime, date, timedelta
-import streamlit_authenticator as stauth
 from database import get_supabase_client, save_health_log, get_health_logs, get_latest_log
 from styles import apply_styles, card_begin, card_end
 from api_service import analyze_food
