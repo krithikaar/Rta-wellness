@@ -140,6 +140,51 @@ def apply_styles():
             transform: scale(1.15) !important;
         }
 
+        /* FULL-WIDTH TABS */
+        div[role="tablist"] {
+            width: 100% !important;
+            display: flex !important;
+            gap: 0px !important;
+            padding-bottom: 20px !important;
+        }
+
+        div[role="tablist"] button[role="tab"] {
+            flex: 1 !important;
+            text-align: center !important;
+            max-width: none !important;
+            border-bottom: 2px solid #e0e4e9 !important;
+            padding: 10px 0 !important;
+        }
+        
+        div[role="tablist"] button[aria-selected="true"] {
+            background-color: transparent !important;
+            border-bottom: 2px solid #008080 !important;
+        }
+
+        div[role="tablist"] button[role="tab"] p {
+             font-size: 0.95rem !important;
+             font-weight: 500 !important;
+             color: #004D4D !important;
+             margin: 0 !important;
+        }
+
+        /* SLIDER THUMB VISIBILITY */
+        div[data-testid="stSlider"] [role="slider"],
+        div[data-testid="stSelectSlider"] [role="slider"] {
+            background-color: #008080 !important;
+            border: 2px solid #008080 !important;
+            box-shadow: 0 0 2px rgba(0, 0, 0, 0.2) !important;
+            height: 18px !important;
+            width: 18px !important;
+            z-index: 2 !important;
+        }
+        
+        div[data-testid="stSlider"] [role="slider"]:hover,
+        div[data-testid="stSelectSlider"] [role="slider"]:hover {
+            transform: scale(1.1);
+            background-color: #004D4D !important;
+        }
+
         /* FAINT DASHBOARD METRICS INFO BUTTON */
         div[title="Metrics Info"] button p,
         button[title="Metrics Info"] p {
@@ -172,6 +217,30 @@ def apply_styles():
         div[role="slider"] {
             border-color: #008080 !important;
             background-color: #FDFBF7 !important;
+        }
+
+        /* INPUT FIELDS (Restoring the 'shaded box' look) */
+        div[data-baseweb="input"], 
+        div[data-baseweb="select"], 
+        div[data-baseweb="textarea"],
+        [data-testid="stNumberInput"] div[data-baseweb="base-input"],
+        [data-testid="stTextInput"] div[data-baseweb="base-input"] {
+            background-color: #f1f3f6 !important;
+            border: 1px solid #e0e4e9 !important;
+            border-radius: 10px !important;
+            transition: all 0.2s ease !important;
+        }
+
+        div[data-baseweb="input"]:focus-within, 
+        div[data-baseweb="select"]:focus-within, 
+        div[data-baseweb="textarea"]:focus-within {
+            border-color: #008080 !important;
+            background-color: #ffffff !important;
+            box-shadow: 0 0 0 1px #008080 !important;
+        }
+
+        input, textarea {
+            color: #004D4D !important;
         }
         </style>
     """, unsafe_allow_html=True)

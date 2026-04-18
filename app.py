@@ -94,13 +94,21 @@ def handle_signup():
         submit = st.form_submit_button("Create Account", use_container_width=True)
         if submit:
             try:
-                res = supabase.auth.sign_up({"email": email, "password": password, "options": {"data": {"full_name": name}}})
+                res = supabase.auth.sign_up({
+                    "email": email, 
+                    "password": password, 
+                    "options": {"data": {"full_name": name}}
+                })
+                # If session is returned immediately (e.g. auto-confirm is on in Supabase), log them in
                 if res.session:
+                    st.session_state.user = res.user
                     st.session_state.access_token = res.session.access_token
                     st.session_state.refresh_token = res.session.refresh_token
-                st.success("Account created! Please check your email for verification (if enabled) or login now.")
-                st.session_state.auth_mode = 'login'
-                st.rerun()
+                    st.rerun()
+                else:
+                    # Otherwise, show the verification pending screen
+                    st.session_state.auth_mode = 'verify_email'
+                    st.rerun()
             except Exception as e:
                 st.error(f"Signup failed: {e}")
     
@@ -110,14 +118,29 @@ def handle_signup():
             st.session_state.auth_mode = 'login'
             st.rerun()
 
+def handle_verify_email():
+    col_logo_1, col_logo_2, col_logo_3 = st.columns([1,1.5,1])
+    with col_logo_2:
+        st.image("assets/logo.svg", use_container_width=True)
+    st.markdown("<h2 style='text-align:center; margin-top:-20px;'>Check your email</h2>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align:center; color: #666; margin-top:-10px; margin-bottom:20px;'>We've sent a verification link to your inbox. Please click it to activate your account and then return here to login.</p>", unsafe_allow_html=True)
+    
+    col_link = st.columns([1,2,1])
+    with col_link[1]:
+        if st.button("Back to Login", use_container_width=True):
+            st.session_state.auth_mode = 'login'
+            st.rerun()
+
 if st.session_state.user is None:
     if 'auth_mode' not in st.session_state:
         st.session_state.auth_mode = 'login'
     
     if st.session_state.auth_mode == 'login':
         handle_login()
-    else:
+    elif st.session_state.auth_mode == 'signup':
         handle_signup()
+    else:
+        handle_verify_email()
     st.stop()
 
 # User ID from Supabase
@@ -192,7 +215,6 @@ elif st.session_state.page == 'home':
     st.markdown('<p class="cycles-title">Cycles of Self</p>', unsafe_allow_html=True)
     
     if st.button("DASHBOARD", use_container_width=True): navigate_to('dashboard')
-    if st.button("DAILY LOG", use_container_width=True): navigate_to('daily_log')
     if st.button("PROFILE", use_container_width=True): navigate_to('profile')
     if st.button("LOGOUT", use_container_width=True):
         supabase.auth.sign_out()
@@ -200,176 +222,203 @@ elif st.session_state.page == 'home':
         st.rerun()
 
 elif st.session_state.page == 'dashboard':
-    show_nav_row(left_page='home', right_page='daily_log', show_calendar=False)
-    st.markdown("<h3 style='text-align:center;'>Weekly Overview</h3>", unsafe_allow_html=True)
+    show_nav_row(left_page='home', right_page=None)
     
-    # Week Slider
-    monday = get_monday(date.today()) + timedelta(weeks=st.session_state.week_offset)
-    days = [monday + timedelta(days=i) for i in range(7)]
-    labels = ["M", "T", "W", "T", "F", "S", "S"]
-    col_w1, col_w2, col_w3 = st.columns([1, 10, 1], vertical_alignment="bottom")
-    with col_w1:
-        st.markdown('<div class="week-nav-proxy"></div>', unsafe_allow_html=True)
-        if st.button("", icon=":material/keyboard_double_arrow_left:", key="w_prev", type="tertiary", help="Prev Week"):
-            st.session_state.week_offset -= 1
-            st.rerun()
-    with col_w3:
-        st.markdown('<div class="week-nav-proxy"></div>', unsafe_allow_html=True)
-        if st.button("", icon=":material/keyboard_double_arrow_right:", key="w_next", type="tertiary", help="Next Week"):
-            st.session_state.week_offset += 1
-            st.rerun()
+    tab_stats, tab_weight, tab_food, tab_activity = st.tabs(["Stats", "Weight", "Food", "Activity"])
     
-    with col_w2:
-        day_cols = st.columns(7)
-        for i, d in enumerate(days):
-            with day_cols[i]:
-                is_sel = d == st.session_state.selected_date
-                if st.button(labels[i], key=f"d_btn_{i}", type="primary" if is_sel else "secondary", use_container_width=True):
-                    st.session_state.selected_date = d
+    with tab_stats:
+        # Centered Calendar Navigation
+        col_cal_1, col_cal_2, col_cal_3 = st.columns([1, 1, 1])
+        with col_cal_2:
+            st.markdown('<div class="cal-nav-proxy"></div>', unsafe_allow_html=True)
+            with st.popover("", icon=":material/calendar_month:", help="Select Date", use_container_width=True):
+                new_date = st.date_input("Select Date", value=st.session_state.selected_date, key="dashboard_cal")
+                if new_date != st.session_state.selected_date:
+                    st.session_state.selected_date = new_date
                     st.rerun()
-                st.markdown(f"<p style='text-align:center; font-size:0.7rem; margin-top:-5px;'>{d.day}</p>", unsafe_allow_html=True)
-
-    st.markdown(f"<h4 style='text-align:center;'>{st.session_state.selected_date.strftime('%b %d, %Y')}</h4>", unsafe_allow_html=True)
-    
-    # Graph Range Selector
-    graph_range = st.select_slider(
-        "Select Range",
-        options=["Weekly", "Monthly", "All Time"],
-        value="Weekly",
-        label_visibility="collapsed",
-        key="graph_range"
-    )
-    
-    df_w = get_health_logs(user_id, 'weight')
-    
-    if not df_w.empty:
-        # Filter based on range
+        
+        # Date Display
+        st.markdown(f"<h4 style='text-align:center; margin-top:-10px;'>{st.session_state.selected_date.strftime('%b %d, %Y')}</h4>", unsafe_allow_html=True)
+        
+        # 3. Slider for range
+        graph_range = st.select_slider(
+            "Select Range",
+            options=["Weekly", "Monthly", "All Time"],
+            value="Weekly",
+            label_visibility="collapsed",
+            key="graph_range_main"
+        )
+        
+        # 4. Weight Graph
+        df_w = get_health_logs(user_id, 'weight')
         today = date.today()
-        if graph_range == "Weekly":
-            df_w = df_w[df_w['log_date'].dt.date >= (today - timedelta(days=7))]
-        elif graph_range == "Monthly":
-            df_w = df_w[df_w['log_date'].dt.date >= (today - timedelta(days=30))]
+        if not df_w.empty:
+            if graph_range == "Weekly":
+                df_w = df_w[df_w['log_date'].dt.date >= (today - timedelta(days=7))]
+            elif graph_range == "Monthly":
+                df_w = df_w[df_w['log_date'].dt.date >= (today - timedelta(days=30))]
             
-    fig = go.Figure()
-    if not df_w.empty:
-        # Sort by date for proper line connection
-        if 'log_date' in df_w.columns:
             df_w = df_w.sort_values(by='log_date')
             df_w['date_str'] = df_w['log_date'].dt.strftime('%b %d')
-            fig.add_trace(go.Scatter(x=df_w['date_str'], y=df_w['pre_weight'], mode='lines+markers', name='Pre-Gym', line=dict(color='#008080', width=3), marker=dict(size=8)))
+            
+        fig = go.Figure()
+        if not df_w.empty:
+            fig.add_trace(go.Scatter(x=df_w['date_str'], y=df_w['pre_weight'], mode='lines+markers', name='Pre-Gym', line=dict(color='#008080', width=3)))
             if 'post_weight' in df_w.columns:
-                 fig.add_trace(go.Scatter(x=df_w['date_str'], y=df_w['post_weight'], mode='lines+markers', name='Post-Gym', line=dict(color='#20B2AA', width=3), marker=dict(size=8)))
-    fig.update_layout(height=220, margin=dict(l=0,r=0,t=30,b=0), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-                      xaxis=dict(type='category', showgrid=False), yaxis=dict(showgrid=True, gridcolor='rgba(0,0,0,0.1)'))
-    st.plotly_chart(fig, use_container_width=True)
-    
-    card_begin()
-    c1, c2, c3 = st.columns(3)
-    
-    user_height_cm = st.session_state.user.user_metadata.get('height')
-    w_entry = get_latest_log(user_id, 'weight', st.session_state.selected_date)
-    f_entry = get_latest_log(user_id, 'food', st.session_state.selected_date)
-    a_entry = get_latest_log(user_id, 'activity', st.session_state.selected_date)
-    
-    current_bmi = "--"
-    if w_entry and user_height_cm:
-        h_m = float(user_height_cm) / 100
-        w_kg = float(w_entry.get('pre_weight', 0))
-        if h_m > 0 and w_kg > 0:
-            bmi = w_kg / (h_m * h_m)
-            current_bmi = f"{bmi:.1f}"
-            
-    total_kcal = "--"
-    if f_entry:
-        total_kcal = str(int(f_entry.get('calories', 0)))
+                fig.add_trace(go.Scatter(x=df_w['date_str'], y=df_w['post_weight'], mode='lines+markers', name='Post-Gym', line=dict(color='#20B2AA', width=3)))
         
-    activity_score = "--"
-    if a_entry:
-        water = float(a_entry.get('water', 0))
-        sleep = float(a_entry.get('sleep_duration', 0))
-        stress = float(a_entry.get('stress', 0))
-        # Cumulative score from the 3 sliders
-        activity_score = str(int(water + sleep + stress))
-            
-    c1.metric("Current BMI", current_bmi)
-    c2.metric("Total Kcal", total_kcal)
-    c3.metric("Activity Score", activity_score)
-    card_end()
-    
-    col_btn1, col_btn2, col_btn3 = st.columns([1, 2, 1])
-    with col_btn2:
-        if st.button("what does it mean?", type="tertiary", use_container_width=True, help="Metrics Info"):
-            show_metrics_info()
-
-elif st.session_state.page == 'daily_log':
-    show_nav_row(left_page='dashboard', right_page='weight')
-    st.markdown("<h3 style='text-align:center;'>Daily Log</h3>", unsafe_allow_html=True)
-    if st.button("WEIGHT", use_container_width=True): navigate_to('weight')
-    if st.button("FOOD DIARY", use_container_width=True): navigate_to('food')
-    if st.button("ACTIVITY", use_container_width=True): navigate_to('activity')
-
-elif st.session_state.page == 'weight':
-    show_nav_row(left_page='daily_log', right_page='food', show_calendar=True)
-    st.markdown(f'<p class="date-header">{st.session_state.selected_date.strftime("%B %d, %Y")}</p>', unsafe_allow_html=True)
-    st.markdown("<h3 style='text-align:center;'>Weight Logger</h3>", unsafe_allow_html=True)
-    
-    existing = get_latest_log(user_id, 'weight', st.session_state.selected_date)
-    card_begin()
-    colw1, colw2 = st.columns(2)
-    pre_w = colw1.number_input("Pre-Gym (kg)", min_value=0.0, step=0.1, value=float(existing.get('pre_weight', 0.0)) if existing else 0.0)
-    post_w = colw2.number_input("Post-Gym (kg)", min_value=0.0, step=0.1, value=float(existing.get('post_weight', 0.0)) if existing else 0.0)
-    if st.button("SAVE ENTRY", use_container_width=True):
-        save_health_log(user_id, st.session_state.selected_date, 'weight', {"pre_weight": pre_w, "post_weight": post_w})
-        st.success("Log Saved")
-    card_end()
-
-elif st.session_state.page == 'food':
-    show_nav_row(left_page='weight', right_page='activity', show_calendar=True)
-    st.markdown(f'<p class="date-header">{st.session_state.selected_date.strftime("%B %d, %Y")}</p>', unsafe_allow_html=True)
-    st.markdown("<h3 style='text-align:center;'>Food Diary</h3>", unsafe_allow_html=True)
-    
-    existing = get_latest_log(user_id, 'food', st.session_state.selected_date)
-    card_begin()
-    f_text = st.text_area("What did you have?", value=existing.get('raw_text', "") if existing else "", height=150)
-    if st.button("ANALYZE & SAVE", use_container_width=True):
-        with st.spinner("Analyzing..."):
-            nutrition = analyze_food(f_text)
-            save_health_log(user_id, st.session_state.selected_date, 'food', {
-                "raw_text": f_text,
-                "time": datetime.now().strftime("%I:%M %p"),
-                **nutrition
-            })
-            st.rerun()
-    card_end()
-    if existing:
+        fig.update_layout(height=220, margin=dict(l=0,r=0,t=20,b=0), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+                          xaxis=dict(type='category', showgrid=False), yaxis=dict(showgrid=True, gridcolor='rgba(0,0,0,0.1)'))
+        st.plotly_chart(fig, use_container_width=True, key="dashboard_fig")
+        
+        # 5. Metrics Card
         card_begin()
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Kcal", int(existing.get('calories', 0)))
-        c2.metric("P", f"{int(existing.get('protein', 0))}g")
-        c3.metric("C", f"{int(existing.get('carbs', 0))}g")
-        c4.metric("F", f"{int(existing.get('fats', 0))}g")
+        c1, c2, c3 = st.columns(3)
+        
+        user_height_cm = st.session_state.user.user_metadata.get('height')
+        w_entry = get_latest_log(user_id, 'weight', st.session_state.selected_date)
+        f_entry = get_latest_log(user_id, 'food', st.session_state.selected_date)
+        a_entry = get_latest_log(user_id, 'activity', st.session_state.selected_date)
+        
+        bmi_val = "--"
+        if w_entry and user_height_cm:
+            h_m = float(user_height_cm) / 100
+            w_kg = float(w_entry.get('pre_weight', 0))
+            if h_m > 0 and w_kg > 0: bmi_val = f"{w_kg / (h_m * h_m):.1f}"
+                
+        kcal_val = str(int(f_entry.get('calories', 0))) if f_entry else "--"
+        
+        score_val = "--"
+        if a_entry:
+            # Sum of all sliders for holistic indicator
+            s_water = float(a_entry.get('water', 0))
+            s_sleep = float(a_entry.get('sleep_quality', 0))
+            s_stress = float(a_entry.get('stress', 0))
+            s_sore = float(a_entry.get('soreness', 0))
+            s_intens = float(a_entry.get('intensity', 0))
+            score_val = str(int(s_water + s_sleep + s_stress + s_sore + s_intens))
+        
+        c1.metric("Current BMI", bmi_val)
+        c2.metric("Total Kcal", kcal_val)
+        c3.metric("Activity Score", score_val)
         card_end()
         
-        micros_text = existing.get('micros', '')
-        if micros_text:
-            st.markdown(f"<p style='text-align:center; color:#888; font-size:0.85rem; margin-top:8px;'>{micros_text}</p>", unsafe_allow_html=True)
+        # 6. What does it mean?
+        col_info_1, col_info_2, col_info_3 = st.columns([1, 2, 1])
+        with col_info_2:
+            if st.button("what does it mean?", type="tertiary", use_container_width=True, key="dashboard_info"):
+                show_metrics_info()
 
-elif st.session_state.page == 'activity':
-    show_nav_row(left_page='food', right_page='dashboard', show_calendar=True)
-    st.markdown(f'<p class="date-header">{st.session_state.selected_date.strftime("%B %d, %Y")}</p>', unsafe_allow_html=True)
-    st.markdown("<h3 style='text-align:center;'>Activity</h3>", unsafe_allow_html=True)
-    
-    curr = get_latest_log(user_id, 'activity', st.session_state.selected_date) or {}
-    card_begin()
-    water = st.slider("Water (L)", 0.0, 10.0, float(curr.get('water', 2.0)), 0.5)
-    sleep = st.slider("Sleep (Hrs)", 0.0, 16.0, float(curr.get('sleep_duration', 7.0)), 0.5)
-    stress = st.slider("Stress (1-10)", 1, 10, int(curr.get('stress', 3)))
-    if st.button("SAVE ACTIVITY", use_container_width=True):
-        save_health_log(user_id, st.session_state.selected_date, 'activity', {
-            "water": water,
-            "sleep_duration": sleep,
-            "sleep_quality": 7,
-            "stress": stress
-        })
-        st.success("Activity Logged")
-    card_end()
+    with tab_weight:
+        # Centered Calendar Navigation
+        w_col_cal_1, w_col_cal_2, w_col_cal_3 = st.columns([1, 1, 1])
+        with w_col_cal_2:
+            st.markdown('<div class="cal-nav-proxy"></div>', unsafe_allow_html=True)
+            with st.popover("", icon=":material/calendar_month:", help="Select Date", use_container_width=True):
+                new_date = st.date_input("Select Date", value=st.session_state.selected_date, key="weight_tab_cal")
+                if new_date != st.session_state.selected_date:
+                    st.session_state.selected_date = new_date
+                    st.rerun()
+        
+        # Date Display
+        st.markdown(f"<h4 style='text-align:center; margin-top:-10px;'>{st.session_state.selected_date.strftime('%b %d, %Y')}</h4>", unsafe_allow_html=True)
+        
+        # Existing Log Fetch
+        existing_w = get_latest_log(user_id, 'weight', st.session_state.selected_date)
+        
+        card_begin()
+        pre_w = st.number_input("Pre-workout weight (kg)", min_value=0.0, step=0.1, value=float(existing_w.get('pre_weight', 0.0)) if existing_w else 0.0, format="%.1f")
+        post_w = st.number_input("Post-workout weight (kg)", min_value=0.0, step=0.1, value=float(existing_w.get('post_weight', 0.0)) if existing_w else 0.0, format="%.1f")
+        
+        if st.button("SAVE WEIGHT", use_container_width=True):
+            save_health_log(user_id, st.session_state.selected_date, 'weight', {"pre_weight": pre_w, "post_weight": post_w})
+            st.success(f"Weight Logged for {st.session_state.selected_date.strftime('%b %d, %Y')}")
+        card_end()
+    with tab_food:
+        # Centered Calendar Navigation
+        f_col_cal_1, f_col_cal_2, f_col_cal_3 = st.columns([1, 1, 1])
+        with f_col_cal_2:
+            st.markdown('<div class="cal-nav-proxy"></div>', unsafe_allow_html=True)
+            with st.popover("", icon=":material/calendar_month:", help="Select Date", use_container_width=True):
+                new_date = st.date_input("Select Date", value=st.session_state.selected_date, key="food_tab_cal")
+                if new_date != st.session_state.selected_date:
+                    st.session_state.selected_date = new_date
+                    st.rerun()
+        
+        # Date Display
+        st.markdown(f"<h4 style='text-align:center; margin-top:-10px;'>{st.session_state.selected_date.strftime('%b %d, %Y')}</h4>", unsafe_allow_html=True)
+        
+        # Food Entry Fetch
+        existing_f = get_latest_log(user_id, 'food', st.session_state.selected_date)
+        
+        st.markdown("<h5 style='text-align:center; margin-bottom: 5px;'>What did you have?</h5>", unsafe_allow_html=True)
+        card_begin()
+        # Use existing text if available
+        food_text = st.text_area("What did you have?", value=existing_f.get('raw_text', "") if existing_f else "", height=150, label_visibility="collapsed", key="food_tab_input")
+        
+        if st.button("ANALYZE & SAVE", use_container_width=True):
+            if food_text.strip():
+                with st.spinner("Analyzing with AI..."):
+                    nutrition = analyze_food(food_text)
+                    save_health_log(user_id, st.session_state.selected_date, 'food', {
+                        "raw_text": food_text,
+                        "time": datetime.now().strftime("%I:%M %p"),
+                        **nutrition
+                    })
+                    st.success(f"Food Logged for {st.session_state.selected_date.strftime('%b %d, %Y')}")
+                    st.rerun()
+            else:
+                st.warning("Please enter some food items first.")
+        card_end()
+        
+        # Metrics Display
+        if existing_f:
+            st.markdown("<div style='margin-top: 15px;'></div>", unsafe_allow_html=True)
+            card_begin()
+            fc1, fc2, fc3, fc4 = st.columns(4)
+            fc1.metric("Kcal", int(existing_f.get('calories', 0)))
+            fc2.metric("P", f"{int(existing_f.get('protein', 0))}g")
+            fc3.metric("C", f"{int(existing_f.get('carbs', 0))}g")
+            fc4.metric("F", f"{int(existing_f.get('fats', 0))}g")
+            card_end()
+            
+            # Micro-nutrients in grey text
+            micros = existing_f.get('micros', '')
+            if micros:
+                st.markdown(f"<p style='text-align:center; color:#888; font-size:0.85rem; margin-top:10px;'>{micros}</p>", unsafe_allow_html=True)
+    with tab_activity:
+        # Centered Calendar Navigation
+        a_col_cal_1, a_col_cal_2, a_col_cal_3 = st.columns([1, 1, 1])
+        with a_col_cal_2:
+            st.markdown('<div class="cal-nav-proxy"></div>', unsafe_allow_html=True)
+            with st.popover("", icon=":material/calendar_month:", help="Select Date", use_container_width=True):
+                new_date = st.date_input("Select Date", value=st.session_state.selected_date, key="activity_tab_cal")
+                if new_date != st.session_state.selected_date:
+                    st.session_state.selected_date = new_date
+                    st.rerun()
+        
+        # Date Display
+        st.markdown(f"<h4 style='text-align:center; margin-top:-10px;'>{st.session_state.selected_date.strftime('%b %d, %Y')}</h4>", unsafe_allow_html=True)
+        
+        # Existing Activity Fetch
+        curr_a = get_latest_log(user_id, 'activity', st.session_state.selected_date) or {}
+        
+        card_begin()
+        water = st.slider("Water (L)", 0.0, 10.0, float(curr_a.get('water', 2.0)), 0.5)
+        sleep_q = st.slider("Sleep Quality (1-10)", 1, 10, int(curr_a.get('sleep_quality', 7)))
+        stress = st.slider("Stress (1-10)", 1, 10, int(curr_a.get('stress', 3)))
+        soreness = st.slider("Muscle Soreness (1-10)", 1, 10, int(curr_a.get('soreness', 1)))
+        intensity = st.slider("Workout Intensity (1-10)", 1, 10, int(curr_a.get('intensity', 5)))
+        
+        if st.button("SAVE ACTIVITY", use_container_width=True):
+            save_health_log(user_id, st.session_state.selected_date, 'activity', {
+                "water": water,
+                "sleep_quality": sleep_q,
+                "stress": stress,
+                "soreness": soreness,
+                "intensity": intensity
+            })
+            st.success(f"Activity Logged for {st.session_state.selected_date.strftime('%b %d, %Y')}")
+            st.rerun()
+        card_end()
+
