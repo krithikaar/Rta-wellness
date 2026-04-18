@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 from datetime import datetime, date, timedelta
-from database import get_supabase_client, save_health_log, get_health_logs, get_latest_log
+from database import get_supabase_client, upsert_daily_log, get_daily_logs, get_daily_log
 from styles import apply_styles, card_begin, card_end
 from api_service import analyze_food
 
@@ -250,7 +250,7 @@ elif st.session_state.page == 'dashboard':
         )
         
         # 4. Weight Graph
-        df_w = get_health_logs(user_id, 'weight')
+        df_w = get_daily_logs(user_id)
         today = date.today()
         if not df_w.empty:
             if graph_range == "Weekly":
@@ -263,7 +263,9 @@ elif st.session_state.page == 'dashboard':
             
         fig = go.Figure()
         if not df_w.empty:
-            fig.add_trace(go.Scatter(x=df_w['date_str'], y=df_w['pre_weight'], mode='lines+markers', name='Pre-Gym', line=dict(color='#008080', width=3)))
+            # Check for pre_weight in the daily record columns
+            if 'pre_weight' in df_w.columns:
+                fig.add_trace(go.Scatter(x=df_w['date_str'], y=df_w['pre_weight'], mode='lines+markers', name='Pre-Gym', line=dict(color='#008080', width=3)))
             if 'post_weight' in df_w.columns:
                 fig.add_trace(go.Scatter(x=df_w['date_str'], y=df_w['post_weight'], mode='lines+markers', name='Post-Gym', line=dict(color='#20B2AA', width=3)))
         
@@ -271,32 +273,15 @@ elif st.session_state.page == 'dashboard':
                           xaxis=dict(type='category', showgrid=False), yaxis=dict(showgrid=True, gridcolor='rgba(0,0,0,0.1)'))
         st.plotly_chart(fig, use_container_width=True, key="dashboard_fig")
         
-        # 5. Metrics Card
+        # 5. Metrics Card (Single fetch for everything)
         card_begin()
         c1, c2, c3 = st.columns(3)
         
-        user_height_cm = st.session_state.user.user_metadata.get('height')
-        w_entry = get_latest_log(user_id, 'weight', st.session_state.selected_date)
-        f_entry = get_latest_log(user_id, 'food', st.session_state.selected_date)
-        a_entry = get_latest_log(user_id, 'activity', st.session_state.selected_date)
+        daily_data = get_daily_log(user_id, st.session_state.selected_date)
         
-        bmi_val = "--"
-        if w_entry and user_height_cm:
-            h_m = float(user_height_cm) / 100
-            w_kg = float(w_entry.get('pre_weight', 0))
-            if h_m > 0 and w_kg > 0: bmi_val = f"{w_kg / (h_m * h_m):.1f}"
-                
-        kcal_val = str(int(f_entry.get('calories', 0))) if f_entry else "--"
-        
-        score_val = "--"
-        if a_entry:
-            # Sum of all sliders for holistic indicator
-            s_water = float(a_entry.get('water', 0))
-            s_sleep = float(a_entry.get('sleep_quality', 0))
-            s_stress = float(a_entry.get('stress', 0))
-            s_sore = float(a_entry.get('soreness', 0))
-            s_intens = float(a_entry.get('intensity', 0))
-            score_val = str(int(s_water + s_sleep + s_stress + s_sore + s_intens))
+        bmi_val = str(daily_data.get('bmi', '--'))
+        kcal_val = str(int(daily_data.get('calories', 0))) if 'calories' in daily_data else "--"
+        score_val = str(int(daily_data.get('activity_score', 0))) if 'activity_score' in daily_data else "--"
         
         c1.metric("Current BMI", bmi_val)
         c2.metric("Total Kcal", kcal_val)
@@ -324,14 +309,24 @@ elif st.session_state.page == 'dashboard':
         st.markdown(f"<h4 style='text-align:center; margin-top:-10px;'>{st.session_state.selected_date.strftime('%b %d, %Y')}</h4>", unsafe_allow_html=True)
         
         # Existing Log Fetch
-        existing_w = get_latest_log(user_id, 'weight', st.session_state.selected_date)
+        existing_data = get_daily_log(user_id, st.session_state.selected_date)
         
         card_begin()
-        pre_w = st.number_input("Pre-workout weight (kg)", min_value=0.0, step=0.1, value=float(existing_w.get('pre_weight', 0.0)) if existing_w else 0.0, format="%.1f")
-        post_w = st.number_input("Post-workout weight (kg)", min_value=0.0, step=0.1, value=float(existing_w.get('post_weight', 0.0)) if existing_w else 0.0, format="%.1f")
+        pre_w = st.number_input("Pre-workout weight (kg)", min_value=0.0, step=0.1, value=float(existing_data.get('pre_weight', 0.0)) if existing_data else 0.0, format="%.1f")
+        post_w = st.number_input("Post-workout weight (kg)", min_value=0.0, step=0.1, value=float(existing_data.get('post_weight', 0.0)) if existing_data else 0.0, format="%.1f")
         
         if st.button("SAVE WEIGHT", use_container_width=True):
-            save_health_log(user_id, st.session_state.selected_date, 'weight', {"pre_weight": pre_w, "post_weight": post_w})
+            user_height_cm = st.session_state.user.user_metadata.get('height')
+            bmi = "--"
+            if user_height_cm and pre_w > 0:
+                h_m = float(user_height_cm) / 100
+                bmi = round(pre_w / (h_m * h_m), 1)
+            
+            upsert_daily_log(user_id, st.session_state.selected_date, {
+                "pre_weight": pre_w, 
+                "post_weight": post_w,
+                "bmi": bmi
+            })
             st.success(f"Weight Logged for {st.session_state.selected_date.strftime('%b %d, %Y')}")
         card_end()
     with tab_food:
@@ -349,20 +344,20 @@ elif st.session_state.page == 'dashboard':
         st.markdown(f"<h4 style='text-align:center; margin-top:-10px;'>{st.session_state.selected_date.strftime('%b %d, %Y')}</h4>", unsafe_allow_html=True)
         
         # Food Entry Fetch
-        existing_f = get_latest_log(user_id, 'food', st.session_state.selected_date)
+        existing_data = get_daily_log(user_id, st.session_state.selected_date)
         
         st.markdown("<h5 style='text-align:center; margin-bottom: 5px;'>What did you have?</h5>", unsafe_allow_html=True)
         card_begin()
         # Use existing text if available
-        food_text = st.text_area("What did you have?", value=existing_f.get('raw_text', "") if existing_f else "", height=150, label_visibility="collapsed", key="food_tab_input")
+        food_text = st.text_area("What did you have?", value=existing_data.get('raw_text', "") if existing_data else "", height=150, label_visibility="collapsed", key="food_tab_input")
         
         if st.button("ANALYZE & SAVE", use_container_width=True):
             if food_text.strip():
                 with st.spinner("Analyzing with AI..."):
                     nutrition = analyze_food(food_text)
-                    save_health_log(user_id, st.session_state.selected_date, 'food', {
+                    upsert_daily_log(user_id, st.session_state.selected_date, {
                         "raw_text": food_text,
-                        "time": datetime.now().strftime("%I:%M %p"),
+                        "food_time": datetime.now().strftime("%I:%M %p"),
                         **nutrition
                     })
                     st.success(f"Food Logged for {st.session_state.selected_date.strftime('%b %d, %Y')}")
@@ -372,18 +367,18 @@ elif st.session_state.page == 'dashboard':
         card_end()
         
         # Metrics Display
-        if existing_f:
+        if existing_data and 'calories' in existing_data:
             st.markdown("<div style='margin-top: 15px;'></div>", unsafe_allow_html=True)
             card_begin()
             fc1, fc2, fc3, fc4 = st.columns(4)
-            fc1.metric("Kcal", int(existing_f.get('calories', 0)))
-            fc2.metric("P", f"{int(existing_f.get('protein', 0))}g")
-            fc3.metric("C", f"{int(existing_f.get('carbs', 0))}g")
-            fc4.metric("F", f"{int(existing_f.get('fats', 0))}g")
+            fc1.metric("Kcal", int(existing_data.get('calories', 0)))
+            fc2.metric("P", f"{int(existing_data.get('protein', 0))}g")
+            fc3.metric("C", f"{int(existing_data.get('carbs', 0))}g")
+            fc4.metric("F", f"{int(existing_data.get('fats', 0))}g")
             card_end()
             
             # Micro-nutrients in grey text
-            micros = existing_f.get('micros', '')
+            micros = existing_data.get('micros', '')
             if micros:
                 st.markdown(f"<p style='text-align:center; color:#888; font-size:0.85rem; margin-top:10px;'>{micros}</p>", unsafe_allow_html=True)
     with tab_activity:
@@ -401,22 +396,24 @@ elif st.session_state.page == 'dashboard':
         st.markdown(f"<h4 style='text-align:center; margin-top:-10px;'>{st.session_state.selected_date.strftime('%b %d, %Y')}</h4>", unsafe_allow_html=True)
         
         # Existing Activity Fetch
-        curr_a = get_latest_log(user_id, 'activity', st.session_state.selected_date) or {}
+        curr_data = get_daily_log(user_id, st.session_state.selected_date)
         
         card_begin()
-        water = st.slider("Water (L)", 0.0, 10.0, float(curr_a.get('water', 2.0)), 0.5)
-        sleep_q = st.slider("Sleep Quality (1-10)", 1, 10, int(curr_a.get('sleep_quality', 7)))
-        stress = st.slider("Stress (1-10)", 1, 10, int(curr_a.get('stress', 3)))
-        soreness = st.slider("Muscle Soreness (1-10)", 1, 10, int(curr_a.get('soreness', 1)))
-        intensity = st.slider("Workout Intensity (1-10)", 1, 10, int(curr_a.get('intensity', 5)))
+        water = st.slider("Water (L)", 0.0, 10.0, float(curr_data.get('water', 2.0)), 0.5)
+        sleep_q = st.slider("Sleep Quality (1-10)", 1, 10, int(curr_data.get('sleep_quality', 7)))
+        stress = st.slider("Stress (1-10)", 1, 10, int(curr_data.get('stress', 3)))
+        soreness = st.slider("Muscle Soreness (1-10)", 1, 10, int(curr_data.get('soreness', 1)))
+        intensity = st.slider("Workout Intensity (1-10)", 1, 10, int(curr_data.get('intensity', 5)))
         
         if st.button("SAVE ACTIVITY", use_container_width=True):
-            save_health_log(user_id, st.session_state.selected_date, 'activity', {
+            composite_score = water + sleep_q + stress + soreness + intensity
+            upsert_daily_log(user_id, st.session_state.selected_date, {
                 "water": water,
                 "sleep_quality": sleep_q,
                 "stress": stress,
                 "soreness": soreness,
-                "intensity": intensity
+                "intensity": intensity,
+                "activity_score": composite_score
             })
             st.success(f"Activity Logged for {st.session_state.selected_date.strftime('%b %d, %Y')}")
             st.rerun()

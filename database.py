@@ -15,35 +15,43 @@ def get_supabase_client() -> Client:
             pass
     return client
 
-def save_health_log(user_id, log_date, log_type, data_dict):
+def upsert_daily_log(user_id, log_date, new_data):
     """
-    Saves a log entry to Supabase health_logs table.
+    Saves or updates a daily log entry by merging new data into the existing JSONB.
+    Ensures exactly one row per user per day.
     """
     supabase = get_supabase_client()
+    
+    # 1. Fetch current data to perform a merge (Supabase upsert overwrites the whole JSONB column)
+    res = supabase.table("health_logs").select("data").eq("user_id", user_id).eq("log_date", str(log_date)).execute()
+    
+    current_data = {}
+    if res.data:
+        current_data = res.data[0].get('data', {})
+    
+    # 2. Merge new entries
+    current_data.update(new_data)
+    
+    # 3. Perform Upsert
     log_entry = {
         "user_id": user_id,
         "log_date": str(log_date),
-        "log_type": log_type,
-        "data": data_dict
+        "data": current_data
     }
-    result = supabase.table("health_logs").insert(log_entry).execute()
+    
+    result = supabase.table("health_logs").upsert(log_entry, on_conflict="user_id, log_date").execute()
+    
     # Invalidate cache on new save
     st.cache_data.clear()
     return result
 
 @st.cache_data
-def get_health_logs(user_id, log_type=None):
+def get_daily_logs(user_id):
     """
-    Fetches logs for a specific user from Supabase.
-    Can be filtered by log_type.
+    Fetches all daily logs for a specific user and returns as a flattened DataFrame.
     """
     supabase = get_supabase_client()
-    query = supabase.table("health_logs").select("*").eq("user_id", user_id)
-    
-    if log_type:
-        query = query.eq("log_type", log_type)
-        
-    result = query.execute()
+    result = supabase.table("health_logs").select("*").eq("user_id", user_id).execute()
     
     if not result.data:
         return pd.DataFrame()
@@ -52,9 +60,7 @@ def get_health_logs(user_id, log_type=None):
     flat_data = []
     for row in result.data:
         entry = {
-            "id": row["id"],
             "log_date": row["log_date"],
-            "log_type": row["log_type"],
             "created_at": row["created_at"]
         }
         entry.update(row["data"])
@@ -63,24 +69,25 @@ def get_health_logs(user_id, log_type=None):
     df = pd.DataFrame(flat_data)
     if "log_date" in df.columns:
         df["log_date"] = pd.to_datetime(df["log_date"])
+    
+    # Ensure weight columns exist for the graph even if empty
+    for col in ['pre_weight', 'post_weight']:
+        if col not in df.columns:
+            df[col] = None
+            
     return df
 
 @st.cache_data
-def get_latest_log(user_id, log_type, log_date=None):
+def get_daily_log(user_id, log_date):
     """
-    Get the most recent log of a specific type for a user on a specific date.
+    Fetches the single unified log for a specific user and date.
     """
     supabase = get_supabase_client()
-    query = supabase.table("health_logs").select("*").eq("user_id", user_id).eq("log_type", log_type)
-    if log_date:
-        query = query.eq("log_date", str(log_date))
+    res = supabase.table("health_logs").select("data").eq("user_id", user_id).eq("log_date", str(log_date)).execute()
     
-    result = query.order("created_at", desc=True).limit(1).execute()
-    
-    if not result.data:
-        return None
+    if not res.data:
+        return {}
         
-    row = result.data[0]
-    entry = row["data"]
-    entry["log_date"] = row["log_date"]
+    entry = res.data[0]["data"]
+    entry["log_date"] = str(log_date)
     return entry
