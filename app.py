@@ -330,6 +330,13 @@ elif st.session_state.page == 'dashboard':
                                             mode='lines+markers', name='Post-Gym',
                                             line=dict(color='#20B2AA', width=3)))
 
+        # Adjust Y-axis to zoom around data (±3kg)
+        if not df_w.empty:
+            all_vals = pd.concat([df_plot.get('p_w_num', pd.Series()), df_plot.get('po_w_num', pd.Series())]).dropna()
+            if not all_vals.empty:
+                y_min, y_max = all_vals.min() - 3, all_vals.max() + 3
+                fig.update_layout(yaxis=dict(range=[y_min, y_max], autorange=False))
+
         fig.update_layout(
             height=220,
             margin=dict(l=0, r=0, t=20, b=20),
@@ -523,22 +530,18 @@ elif st.session_state.page == 'dashboard':
             st.markdown(f"""
             <div class="macro-grid">
               <div class="macro-card">
-                <div class="macro-icon">🔥</div>
                 <div class="macro-val">{kcal_v}<span class="macro-unit"> kcal</span></div>
                 <div class="macro-lbl">Calories</div>
               </div>
               <div class="macro-card">
-                <div class="macro-icon">💪</div>
                 <div class="macro-val">{prot_v}<span class="macro-unit">g</span></div>
                 <div class="macro-lbl">Protein</div>
               </div>
               <div class="macro-card">
-                <div class="macro-icon">🌾</div>
                 <div class="macro-val">{carb_v}<span class="macro-unit">g</span></div>
                 <div class="macro-lbl">Carbs</div>
               </div>
               <div class="macro-card">
-                <div class="macro-icon">🥑</div>
                 <div class="macro-val">{fat_v}<span class="macro-unit">g</span></div>
                 <div class="macro-lbl">Fats</div>
               </div>
