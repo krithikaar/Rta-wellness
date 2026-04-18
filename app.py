@@ -429,21 +429,103 @@ elif st.session_state.page == 'dashboard':
         display_data = get_daily_log(user_id, st.session_state.selected_date)
         
         if display_data and display_data.get('calories'):
-            st.markdown("<div style='margin-top: 15px;'></div>", unsafe_allow_html=True)
-            card_begin()
-            fc1, fc2, fc3, fc4 = st.columns(4)
-            fc1.metric("Kcal", int(float(display_data.get('calories', 0))))
-            fc2.metric("P", f"{int(float(display_data.get('protein', 0)))}g")
-            fc3.metric("C", f"{int(float(display_data.get('carbs', 0)))}g")
-            fc4.metric("F", f"{int(float(display_data.get('fats', 0)))}g")
-            card_end()
-            
-            micros = display_data.get('micros', '')
+            kcal_v  = int(float(display_data.get('calories', 0)))
+            prot_v  = int(float(display_data.get('protein',  0)))
+            carb_v  = int(float(display_data.get('carbs',    0)))
+            fat_v   = int(float(display_data.get('fats',     0)))
+            micros  = display_data.get('micros', '')
+
+            # ── Glassmorphism Macro Cards ────────────────────────────
+            st.markdown("""
+            <style>
+            .macro-grid {
+                display: grid;
+                grid-template-columns: 1fr 1fr 1fr 1fr;
+                gap: 10px;
+                margin-top: 18px;
+                margin-bottom: 6px;
+            }
+            .macro-card {
+                background: rgba(255,255,255,0.72);
+                backdrop-filter: blur(14px);
+                -webkit-backdrop-filter: blur(14px);
+                border: 1px solid rgba(0,128,128,0.18);
+                border-radius: 18px;
+                padding: 14px 6px 12px 6px;
+                text-align: center;
+                box-shadow: 0 4px 18px rgba(0,77,77,0.08);
+                transition: transform 0.2s ease, box-shadow 0.2s ease;
+            }
+            .macro-card:hover {
+                transform: translateY(-3px);
+                box-shadow: 0 8px 28px rgba(0,128,128,0.15);
+            }
+            .macro-icon { font-size: 1.3rem; margin-bottom: 4px; }
+            .macro-val  {
+                font-size: 1.4rem;
+                font-weight: 700;
+                color: #008080;
+                line-height: 1.1;
+            }
+            .macro-unit { font-size: 0.72rem; color:#008080; opacity:0.7; font-weight:400; }
+            .macro-lbl  { font-size: 0.75rem; color:#555; margin-top:4px; font-weight:500; letter-spacing:0.03rem; }
+            .micros-box {
+                background: rgba(255,255,255,0.55);
+                backdrop-filter: blur(10px);
+                border: 1px solid rgba(0,128,128,0.12);
+                border-radius: 14px;
+                padding: 12px 16px;
+                margin-top: 10px;
+                margin-bottom: 4px;
+                text-align: center;
+                font-size: 0.82rem;
+                color: #556;
+                line-height: 1.6;
+            }
+            .micros-title {
+                font-size: 0.72rem;
+                text-transform: uppercase;
+                letter-spacing: 0.08rem;
+                color: #008080;
+                font-weight: 600;
+                margin-bottom: 4px;
+            }
+            </style>
+            """, unsafe_allow_html=True)
+
+            st.markdown(f"""
+            <div class="macro-grid">
+              <div class="macro-card">
+                <div class="macro-icon">🔥</div>
+                <div class="macro-val">{kcal_v}<span class="macro-unit"> kcal</span></div>
+                <div class="macro-lbl">Calories</div>
+              </div>
+              <div class="macro-card">
+                <div class="macro-icon">💪</div>
+                <div class="macro-val">{prot_v}<span class="macro-unit">g</span></div>
+                <div class="macro-lbl">Protein</div>
+              </div>
+              <div class="macro-card">
+                <div class="macro-icon">🌾</div>
+                <div class="macro-val">{carb_v}<span class="macro-unit">g</span></div>
+                <div class="macro-lbl">Carbs</div>
+              </div>
+              <div class="macro-card">
+                <div class="macro-icon">🥑</div>
+                <div class="macro-val">{fat_v}<span class="macro-unit">g</span></div>
+                <div class="macro-lbl">Fats</div>
+              </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            # ── Micros Display ───────────────────────────────────────
             if micros:
-                st.markdown(
-                    f"<p style='text-align:center; color:#888; font-size:0.85rem; margin-top:10px;'>{micros}</p>",
-                    unsafe_allow_html=True
-                )
+                st.markdown(f"""
+                <div class="micros-box">
+                  <div class="micros-title">✦ Micronutrients</div>
+                  {micros}
+                </div>
+                """, unsafe_allow_html=True)
 
     # ── ACTIVITY TAB ───────────────────────────────────────────────
     with tab_activity:
