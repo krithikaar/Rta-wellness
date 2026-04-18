@@ -232,7 +232,7 @@ elif st.session_state.page == 'dashboard':
         with col_cal_2:
             st.markdown('<div class="cal-nav-proxy"></div>', unsafe_allow_html=True)
             with st.popover("", icon=":material/calendar_month:", help="Select Date", use_container_width=True):
-                new_date = st.date_input("Select Date", value=st.session_state.selected_date, key="dashboard_cal")
+                new_date = st.date_input("Select Date", value=st.session_state.selected_date, key="global_date_picker")
                 if new_date != st.session_state.selected_date:
                     st.session_state.selected_date = new_date
                     st.rerun()
@@ -249,6 +249,9 @@ elif st.session_state.page == 'dashboard':
             key="graph_range_main"
         )
         
+        # 5. Fetch Data for selected date (Source of Truth)
+        daily_data = get_daily_log(user_id, st.session_state.selected_date)
+        
         # 4. Weight Graph
         df_w = get_daily_logs(user_id)
         today = date.today()
@@ -263,25 +266,42 @@ elif st.session_state.page == 'dashboard':
             
         fig = go.Figure()
         if not df_w.empty:
-            # Check for pre_weight in the daily record columns
-            if 'pre_weight' in df_w.columns:
-                fig.add_trace(go.Scatter(x=df_w['date_str'], y=df_w['pre_weight'], mode='lines+markers', name='Pre-Gym', line=dict(color='#008080', width=3)))
-            if 'post_weight' in df_w.columns:
-                fig.add_trace(go.Scatter(x=df_w['date_str'], y=df_w['post_weight'], mode='lines+markers', name='Post-Gym', line=dict(color='#20B2AA', width=3)))
+            # Ensure weight values are strictly numeric and handle potential scaling issues
+            # We use coerce to turn dirty data into NaN, then dropna for the trace
+            df_plot = df_w.copy()
+            
+            if 'pre_weight' in df_plot.columns:
+                df_plot['p_w_num'] = pd.to_numeric(df_plot['pre_weight'], errors='coerce')
+                df_valid = df_plot.dropna(subset=['p_w_num'])
+                if not df_valid.empty:
+                    fig.add_trace(go.Scatter(x=df_valid['date_str'], y=df_valid['p_w_num'], mode='lines+markers', name='Pre-Gym', line=dict(color='#008080', width=3)))
+            
+            if 'post_weight' in df_plot.columns:
+                df_plot['po_w_num'] = pd.to_numeric(df_plot['post_weight'], errors='coerce')
+                df_valid = df_plot.dropna(subset=['po_w_num'])
+                if not df_valid.empty:
+                    fig.add_trace(go.Scatter(x=df_valid['date_str'], y=df_valid['po_w_num'], mode='lines+markers', name='Post-Gym', line=dict(color='#20B2AA', width=3)))
         
-        fig.update_layout(height=220, margin=dict(l=0,r=0,t=20,b=0), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-                          xaxis=dict(type='category', showgrid=False), yaxis=dict(showgrid=True, gridcolor='rgba(0,0,0,0.1)'))
+        # Explicitly set yaxis range to avoid auto-scaling bugs like the 0.07 issue
+        fig.update_layout(height=220, margin=dict(l=0,r=0,t=20,b=20), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+                          xaxis=dict(type='category', showgrid=False), 
+                          yaxis=dict(showgrid=True, gridcolor='rgba(0,0,0,0.1)', nticks=5))
         st.plotly_chart(fig, use_container_width=True, key="dashboard_fig")
         
         # 5. Metrics Card (Single fetch for everything)
         card_begin()
         c1, c2, c3 = st.columns(3)
         
-        daily_data = get_daily_log(user_id, st.session_state.selected_date)
-        
+        # Robust metric extraction
         bmi_val = str(daily_data.get('bmi', '--'))
-        kcal_val = str(int(daily_data.get('calories', 0))) if 'calories' in daily_data else "--"
-        score_val = str(int(daily_data.get('activity_score', 0))) if 'activity_score' in daily_data else "--"
+        
+        kcal_val = "--"
+        if 'calories' in daily_data and daily_data['calories']:
+            kcal_val = str(int(daily_data['calories']))
+            
+        score_val = "--"
+        if 'activity_score' in daily_data and daily_data['activity_score']:
+            score_val = str(int(daily_data['activity_score']))
         
         c1.metric("Current BMI", bmi_val)
         c2.metric("Total Kcal", kcal_val)
@@ -291,7 +311,7 @@ elif st.session_state.page == 'dashboard':
         # 6. What does it mean?
         col_info_1, col_info_2, col_info_3 = st.columns([1, 2, 1])
         with col_info_2:
-            if st.button("what does it mean?", type="tertiary", use_container_width=True, key="dashboard_info"):
+            if st.button("what does it mean?", use_container_width=True, key="dashboard_info"):
                 show_metrics_info()
 
     with tab_weight:
@@ -300,7 +320,7 @@ elif st.session_state.page == 'dashboard':
         with w_col_cal_2:
             st.markdown('<div class="cal-nav-proxy"></div>', unsafe_allow_html=True)
             with st.popover("", icon=":material/calendar_month:", help="Select Date", use_container_width=True):
-                new_date = st.date_input("Select Date", value=st.session_state.selected_date, key="weight_tab_cal")
+                new_date = st.date_input("Select Date", value=st.session_state.selected_date, key="global_date_picker_weight")
                 if new_date != st.session_state.selected_date:
                     st.session_state.selected_date = new_date
                     st.rerun()
@@ -318,16 +338,21 @@ elif st.session_state.page == 'dashboard':
         if st.button("SAVE WEIGHT", use_container_width=True):
             user_height_cm = st.session_state.user.user_metadata.get('height')
             bmi = "--"
-            if user_height_cm and pre_w > 0:
-                h_m = float(user_height_cm) / 100
-                bmi = round(pre_w / (h_m * h_m), 1)
+            try:
+                if user_height_cm and float(user_height_cm) > 0 and pre_w > 0:
+                    h_m = float(user_height_cm) / 100
+                    bmi = round(pre_w / (h_m * h_m), 1)
+            except Exception:
+                bmi = "--"
             
             upsert_daily_log(user_id, st.session_state.selected_date, {
-                "pre_weight": pre_w, 
-                "post_weight": post_w,
+                "pre_weight": float(pre_w), 
+                "post_weight": float(post_w),
                 "bmi": bmi
             })
-            st.success(f"Weight Logged for {st.session_state.selected_date.strftime('%b %d, %Y')}")
+            st.toast(f"Weight Logged for {st.session_state.selected_date.strftime('%b %d, %Y')}")
+            # Rerun to refresh the single daily record immediately
+            st.rerun()
         card_end()
     with tab_food:
         # Centered Calendar Navigation
@@ -335,7 +360,7 @@ elif st.session_state.page == 'dashboard':
         with f_col_cal_2:
             st.markdown('<div class="cal-nav-proxy"></div>', unsafe_allow_html=True)
             with st.popover("", icon=":material/calendar_month:", help="Select Date", use_container_width=True):
-                new_date = st.date_input("Select Date", value=st.session_state.selected_date, key="food_tab_cal")
+                new_date = st.date_input("Select Date", value=st.session_state.selected_date, key="global_date_picker_food")
                 if new_date != st.session_state.selected_date:
                     st.session_state.selected_date = new_date
                     st.rerun()
@@ -360,7 +385,7 @@ elif st.session_state.page == 'dashboard':
                         "food_time": datetime.now().strftime("%I:%M %p"),
                         **nutrition
                     })
-                    st.success(f"Food Logged for {st.session_state.selected_date.strftime('%b %d, %Y')}")
+                    st.toast(f"Food Logged for {st.session_state.selected_date.strftime('%b %d, %Y')}")
                     st.rerun()
             else:
                 st.warning("Please enter some food items first.")
@@ -387,7 +412,7 @@ elif st.session_state.page == 'dashboard':
         with a_col_cal_2:
             st.markdown('<div class="cal-nav-proxy"></div>', unsafe_allow_html=True)
             with st.popover("", icon=":material/calendar_month:", help="Select Date", use_container_width=True):
-                new_date = st.date_input("Select Date", value=st.session_state.selected_date, key="activity_tab_cal")
+                new_date = st.date_input("Select Date", value=st.session_state.selected_date, key="global_date_picker_activity")
                 if new_date != st.session_state.selected_date:
                     st.session_state.selected_date = new_date
                     st.rerun()
@@ -415,7 +440,7 @@ elif st.session_state.page == 'dashboard':
                 "intensity": intensity,
                 "activity_score": composite_score
             })
-            st.success(f"Activity Logged for {st.session_state.selected_date.strftime('%b %d, %Y')}")
+            st.toast(f"Activity Logged for {st.session_state.selected_date.strftime('%b %d, %Y')}")
             st.rerun()
         card_end()
 

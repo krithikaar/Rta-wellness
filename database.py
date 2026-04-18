@@ -45,7 +45,6 @@ def upsert_daily_log(user_id, log_date, new_data):
     st.cache_data.clear()
     return result
 
-@st.cache_data
 def get_daily_logs(user_id):
     """
     Fetches all daily logs for a specific user and returns as a flattened DataFrame.
@@ -77,7 +76,6 @@ def get_daily_logs(user_id):
             
     return df
 
-@st.cache_data
 def get_daily_log(user_id, log_date):
     """
     Fetches the single unified log for a specific user and date.
