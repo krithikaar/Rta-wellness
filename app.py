@@ -22,6 +22,13 @@ if 'selected_date' not in st.session_state:
     st.session_state.selected_date = date.today()
 if 'week_offset' not in st.session_state:
     st.session_state.week_offset = 0
+# Flags for post-save success messages
+if 'show_weight_success' not in st.session_state:
+    st.session_state.show_weight_success = False
+if 'show_food_success' not in st.session_state:
+    st.session_state.show_food_success = False
+if 'show_activity_success' not in st.session_state:
+    st.session_state.show_activity_success = False
 
 # --- Navigation Helpers ---
 def navigate_to(page):
@@ -50,9 +57,34 @@ def show_nav_row(left_page=None, right_page=None, show_calendar=False):
             if st.button("", icon=":material/chevron_right:", key=f"nav_r_{st.session_state.page}", help="Forward"):
                 navigate_to(right_page)
 
-# --- Authentication ---
-# Removed 'user' initialization from here as it's handled above with cookies
+# --- Date Picker Callback ---
+def on_date_change(key):
+    """Callback to sync date from any tab's picker into session state."""
+    new_date = st.session_state[key]
+    if new_date != st.session_state.selected_date:
+        st.session_state.selected_date = new_date
 
+def render_date_picker(tab_key):
+    """Renders the centered calendar popover + date display for a given tab."""
+    col1, col2, col3 = st.columns([1, 1, 1])
+    with col2:
+        st.markdown('<div class="cal-nav-proxy"></div>', unsafe_allow_html=True)
+        with st.popover("", icon=":material/calendar_month:", help="Select Date", use_container_width=True):
+            st.date_input(
+                "Select Date",
+                value=st.session_state.selected_date,
+                key=tab_key,
+                on_change=on_date_change,
+                args=(tab_key,)
+            )
+    # Always shows the current session_state date — updates immediately on callback
+    st.markdown(
+        f"<h4 style='text-align:center; margin-top:-10px;'>"
+        f"{st.session_state.selected_date.strftime('%b %d, %Y')}</h4>",
+        unsafe_allow_html=True
+    )
+
+# --- Authentication ---
 def handle_login():
     col_logo_1, col_logo_2, col_logo_3 = st.columns([1,1.5,1])
     with col_logo_2:
@@ -99,14 +131,12 @@ def handle_signup():
                     "password": password, 
                     "options": {"data": {"full_name": name}}
                 })
-                # If session is returned immediately (e.g. auto-confirm is on in Supabase), log them in
                 if res.session:
                     st.session_state.user = res.user
                     st.session_state.access_token = res.session.access_token
                     st.session_state.refresh_token = res.session.refresh_token
                     st.rerun()
                 else:
-                    # Otherwise, show the verification pending screen
                     st.session_state.auth_mode = 'verify_email'
                     st.rerun()
             except Exception as e:
@@ -199,7 +229,7 @@ def handle_profile(is_onboarding=False):
 def show_metrics_info():
     st.markdown("**Current BMI:** Body Mass Index is a simple measure of body fat based on your weight and height. Normal healthy values typically range between **18.5** and **24.9**.")
     st.markdown("**Total Kcal:** This is the total sum of the calorie intake you've logged today. General daily targets often sit around **2,000 kcal** for adult females and **2,500 kcal** for adult males, though your personal targets may vary.")
-    st.markdown("**Activity Score:** A cumulative snapshot of your daily logging habits. It simply adds up your manually tracked active parameters (Water in Liters, Sleep in Hours, and your qualitative Stress level) into a single holistic indicator.")
+    st.markdown("**Activity Score:** A cumulative snapshot of your daily logging habits. It simply adds up your manually tracked active parameters (Water in Liters, Sleep Quality, Stress, Muscle Soreness, and Workout Intensity) into a single holistic indicator.")
 
 # --- Page Content ---
 if st.session_state.page == 'onboarding':
@@ -226,21 +256,11 @@ elif st.session_state.page == 'dashboard':
     
     tab_stats, tab_weight, tab_food, tab_activity = st.tabs(["Stats", "Weight", "Food", "Activity"])
     
+    # ── STATS TAB ──────────────────────────────────────────────────
     with tab_stats:
-        # Centered Calendar Navigation
-        col_cal_1, col_cal_2, col_cal_3 = st.columns([1, 1, 1])
-        with col_cal_2:
-            st.markdown('<div class="cal-nav-proxy"></div>', unsafe_allow_html=True)
-            with st.popover("", icon=":material/calendar_month:", help="Select Date", use_container_width=True):
-                new_date = st.date_input("Select Date", value=st.session_state.selected_date, key="global_date_picker")
-                if new_date != st.session_state.selected_date:
-                    st.session_state.selected_date = new_date
-                    st.rerun()
+        render_date_picker("stats_date_picker")
         
-        # Date Display
-        st.markdown(f"<h4 style='text-align:center; margin-top:-10px;'>{st.session_state.selected_date.strftime('%b %d, %Y')}</h4>", unsafe_allow_html=True)
-        
-        # 3. Slider for range
+        # Slider for range
         graph_range = st.select_slider(
             "Select Range",
             options=["Weekly", "Monthly", "All Time"],
@@ -249,10 +269,10 @@ elif st.session_state.page == 'dashboard':
             key="graph_range_main"
         )
         
-        # 5. Fetch Data for selected date (Source of Truth)
+        # Fetch Data for selected date (always fresh — no cache)
         daily_data = get_daily_log(user_id, st.session_state.selected_date)
         
-        # 4. Weight Graph
+        # Weight Graph
         df_w = get_daily_logs(user_id)
         today = date.today()
         if not df_w.empty:
@@ -266,8 +286,6 @@ elif st.session_state.page == 'dashboard':
             
         fig = go.Figure()
         if not df_w.empty:
-            # Ensure weight values are strictly numeric and handle potential scaling issues
-            # We use coerce to turn dirty data into NaN, then dropna for the trace
             df_plot = df_w.copy()
             
             if 'pre_weight' in df_plot.columns:
@@ -282,60 +300,76 @@ elif st.session_state.page == 'dashboard':
                 if not df_valid.empty:
                     fig.add_trace(go.Scatter(x=df_valid['date_str'], y=df_valid['po_w_num'], mode='lines+markers', name='Post-Gym', line=dict(color='#20B2AA', width=3)))
         
-        # Explicitly set yaxis range to avoid auto-scaling bugs like the 0.07 issue
-        fig.update_layout(height=220, margin=dict(l=0,r=0,t=20,b=20), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-                          xaxis=dict(type='category', showgrid=False), 
-                          yaxis=dict(showgrid=True, gridcolor='rgba(0,0,0,0.1)', nticks=5))
+        fig.update_layout(
+            height=220,
+            margin=dict(l=0, r=0, t=20, b=20),
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+            xaxis=dict(type='category', showgrid=False),
+            yaxis=dict(showgrid=True, gridcolor='rgba(0,0,0,0.1)', nticks=5)
+        )
         st.plotly_chart(fig, use_container_width=True, key="dashboard_fig")
         
-        # 5. Metrics Card (Single fetch for everything)
+        # Metrics Card
         card_begin()
         c1, c2, c3 = st.columns(3)
         
-        # Robust metric extraction
         bmi_val = str(daily_data.get('bmi', '--'))
         
         kcal_val = "--"
-        if 'calories' in daily_data and daily_data['calories']:
-            kcal_val = str(int(daily_data['calories']))
+        if daily_data.get('calories'):
+            try:
+                kcal_val = str(int(float(daily_data['calories'])))
+            except (ValueError, TypeError):
+                kcal_val = "--"
             
         score_val = "--"
-        if 'activity_score' in daily_data and daily_data['activity_score']:
-            score_val = str(int(daily_data['activity_score']))
+        if daily_data.get('activity_score'):
+            try:
+                score_val = str(int(float(daily_data['activity_score'])))
+            except (ValueError, TypeError):
+                score_val = "--"
         
         c1.metric("Current BMI", bmi_val)
         c2.metric("Total Kcal", kcal_val)
         c3.metric("Activity Score", score_val)
         card_end()
         
-        # 6. What does it mean?
+        # "What does it mean?" button — opens the @st.dialog overlay
         col_info_1, col_info_2, col_info_3 = st.columns([1, 2, 1])
         with col_info_2:
-            if st.button("what does it mean?", use_container_width=True, key="dashboard_info"):
+            if st.button("what does it mean?", use_container_width=True, key="btn_metrics_info"):
                 show_metrics_info()
 
+    # ── WEIGHT TAB ─────────────────────────────────────────────────
     with tab_weight:
-        # Centered Calendar Navigation
-        w_col_cal_1, w_col_cal_2, w_col_cal_3 = st.columns([1, 1, 1])
-        with w_col_cal_2:
-            st.markdown('<div class="cal-nav-proxy"></div>', unsafe_allow_html=True)
-            with st.popover("", icon=":material/calendar_month:", help="Select Date", use_container_width=True):
-                new_date = st.date_input("Select Date", value=st.session_state.selected_date, key="global_date_picker_weight")
-                if new_date != st.session_state.selected_date:
-                    st.session_state.selected_date = new_date
-                    st.rerun()
+        render_date_picker("weight_date_picker")
         
-        # Date Display
-        st.markdown(f"<h4 style='text-align:center; margin-top:-10px;'>{st.session_state.selected_date.strftime('%b %d, %Y')}</h4>", unsafe_allow_html=True)
+        # Show success message from previous save
+        if st.session_state.show_weight_success:
+            st.success(f"✅ Weight logged successfully for {st.session_state.selected_date.strftime('%b %d, %Y')}!")
+            st.session_state.show_weight_success = False
         
-        # Existing Log Fetch
+        # Fetch existing data for this date
         existing_data = get_daily_log(user_id, st.session_state.selected_date)
         
         card_begin()
-        pre_w = st.number_input("Pre-workout weight (kg)", min_value=0.0, step=0.1, value=float(existing_data.get('pre_weight', 0.0)) if existing_data else 0.0, format="%.1f")
-        post_w = st.number_input("Post-workout weight (kg)", min_value=0.0, step=0.1, value=float(existing_data.get('post_weight', 0.0)) if existing_data else 0.0, format="%.1f")
+        pre_w = st.number_input(
+            "Pre-workout weight (kg)",
+            min_value=0.0, step=0.1,
+            value=float(existing_data.get('pre_weight', 0.0)) if existing_data else 0.0,
+            format="%.1f",
+            key=f"pre_w_{st.session_state.selected_date}"
+        )
+        post_w = st.number_input(
+            "Post-workout weight (kg)",
+            min_value=0.0, step=0.1,
+            value=float(existing_data.get('post_weight', 0.0)) if existing_data else 0.0,
+            format="%.1f",
+            key=f"post_w_{st.session_state.selected_date}"
+        )
         
-        if st.button("SAVE WEIGHT", use_container_width=True):
+        if st.button("SAVE WEIGHT", use_container_width=True, key="save_weight_btn"):
             user_height_cm = st.session_state.user.user_metadata.get('height')
             bmi = "--"
             try:
@@ -350,33 +384,33 @@ elif st.session_state.page == 'dashboard':
                 "post_weight": float(post_w),
                 "bmi": bmi
             })
-            st.toast(f"Weight Logged for {st.session_state.selected_date.strftime('%b %d, %Y')}")
-            # Rerun to refresh the single daily record immediately
+            st.session_state.show_weight_success = True
             st.rerun()
         card_end()
+
+    # ── FOOD TAB ───────────────────────────────────────────────────
     with tab_food:
-        # Centered Calendar Navigation
-        f_col_cal_1, f_col_cal_2, f_col_cal_3 = st.columns([1, 1, 1])
-        with f_col_cal_2:
-            st.markdown('<div class="cal-nav-proxy"></div>', unsafe_allow_html=True)
-            with st.popover("", icon=":material/calendar_month:", help="Select Date", use_container_width=True):
-                new_date = st.date_input("Select Date", value=st.session_state.selected_date, key="global_date_picker_food")
-                if new_date != st.session_state.selected_date:
-                    st.session_state.selected_date = new_date
-                    st.rerun()
+        render_date_picker("food_date_picker")
         
-        # Date Display
-        st.markdown(f"<h4 style='text-align:center; margin-top:-10px;'>{st.session_state.selected_date.strftime('%b %d, %Y')}</h4>", unsafe_allow_html=True)
+        # Show success message from previous save
+        if st.session_state.show_food_success:
+            st.success(f"✅ Food logged & analyzed successfully for {st.session_state.selected_date.strftime('%b %d, %Y')}!")
+            st.session_state.show_food_success = False
         
-        # Food Entry Fetch
+        # Fetch existing data for this date
         existing_data = get_daily_log(user_id, st.session_state.selected_date)
         
         st.markdown("<h5 style='text-align:center; margin-bottom: 5px;'>What did you have?</h5>", unsafe_allow_html=True)
         card_begin()
-        # Use existing text if available
-        food_text = st.text_area("What did you have?", value=existing_data.get('raw_text', "") if existing_data else "", height=150, label_visibility="collapsed", key="food_tab_input")
+        food_text = st.text_area(
+            "What did you have?",
+            value=existing_data.get('raw_text', '') if existing_data else '',
+            height=150,
+            label_visibility="collapsed",
+            key=f"food_input_{st.session_state.selected_date}"
+        )
         
-        if st.button("ANALYZE & SAVE", use_container_width=True):
+        if st.button("ANALYZE & SAVE", use_container_width=True, key="analyze_save_btn"):
             if food_text.strip():
                 with st.spinner("Analyzing with AI..."):
                     nutrition = analyze_food(food_text)
@@ -385,52 +419,57 @@ elif st.session_state.page == 'dashboard':
                         "food_time": datetime.now().strftime("%I:%M %p"),
                         **nutrition
                     })
-                    st.toast(f"Food Logged for {st.session_state.selected_date.strftime('%b %d, %Y')}")
+                    st.session_state.show_food_success = True
                     st.rerun()
             else:
                 st.warning("Please enter some food items first.")
         card_end()
         
-        # Metrics Display
-        if existing_data and 'calories' in existing_data:
+        # Re-fetch to display the just-saved (or already stored) nutrition data
+        display_data = get_daily_log(user_id, st.session_state.selected_date)
+        
+        if display_data and display_data.get('calories'):
             st.markdown("<div style='margin-top: 15px;'></div>", unsafe_allow_html=True)
             card_begin()
             fc1, fc2, fc3, fc4 = st.columns(4)
-            fc1.metric("Kcal", int(existing_data.get('calories', 0)))
-            fc2.metric("P", f"{int(existing_data.get('protein', 0))}g")
-            fc3.metric("C", f"{int(existing_data.get('carbs', 0))}g")
-            fc4.metric("F", f"{int(existing_data.get('fats', 0))}g")
+            fc1.metric("Kcal", int(float(display_data.get('calories', 0))))
+            fc2.metric("P", f"{int(float(display_data.get('protein', 0)))}g")
+            fc3.metric("C", f"{int(float(display_data.get('carbs', 0)))}g")
+            fc4.metric("F", f"{int(float(display_data.get('fats', 0)))}g")
             card_end()
             
-            # Micro-nutrients in grey text
-            micros = existing_data.get('micros', '')
+            micros = display_data.get('micros', '')
             if micros:
-                st.markdown(f"<p style='text-align:center; color:#888; font-size:0.85rem; margin-top:10px;'>{micros}</p>", unsafe_allow_html=True)
+                st.markdown(
+                    f"<p style='text-align:center; color:#888; font-size:0.85rem; margin-top:10px;'>{micros}</p>",
+                    unsafe_allow_html=True
+                )
+
+    # ── ACTIVITY TAB ───────────────────────────────────────────────
     with tab_activity:
-        # Centered Calendar Navigation
-        a_col_cal_1, a_col_cal_2, a_col_cal_3 = st.columns([1, 1, 1])
-        with a_col_cal_2:
-            st.markdown('<div class="cal-nav-proxy"></div>', unsafe_allow_html=True)
-            with st.popover("", icon=":material/calendar_month:", help="Select Date", use_container_width=True):
-                new_date = st.date_input("Select Date", value=st.session_state.selected_date, key="global_date_picker_activity")
-                if new_date != st.session_state.selected_date:
-                    st.session_state.selected_date = new_date
-                    st.rerun()
+        render_date_picker("activity_date_picker")
         
-        # Date Display
-        st.markdown(f"<h4 style='text-align:center; margin-top:-10px;'>{st.session_state.selected_date.strftime('%b %d, %Y')}</h4>", unsafe_allow_html=True)
+        # Show success message from previous save
+        if st.session_state.show_activity_success:
+            st.success(f"✅ Activity logged successfully for {st.session_state.selected_date.strftime('%b %d, %Y')}!")
+            st.session_state.show_activity_success = False
         
-        # Existing Activity Fetch
+        # Fetch existing data for this date
         curr_data = get_daily_log(user_id, st.session_state.selected_date)
         
         card_begin()
-        water = st.slider("Water (L)", 0.0, 10.0, float(curr_data.get('water', 2.0)), 0.5)
-        sleep_q = st.slider("Sleep Quality (1-10)", 1, 10, int(curr_data.get('sleep_quality', 7)))
-        stress = st.slider("Stress (1-10)", 1, 10, int(curr_data.get('stress', 3)))
-        soreness = st.slider("Muscle Soreness (1-10)", 1, 10, int(curr_data.get('soreness', 1)))
-        intensity = st.slider("Workout Intensity (1-10)", 1, 10, int(curr_data.get('intensity', 5)))
+        water = st.slider("Water (L)", 0.0, 10.0, float(curr_data.get('water', 2.0)), 0.5,
+                          key=f"water_{st.session_state.selected_date}")
+        sleep_q = st.slider("Sleep Quality (1-10)", 1, 10, int(curr_data.get('sleep_quality', 7)),
+                            key=f"sleep_{st.session_state.selected_date}")
+        stress = st.slider("Stress (1-10)", 1, 10, int(curr_data.get('stress', 3)),
+                           key=f"stress_{st.session_state.selected_date}")
+        soreness = st.slider("Muscle Soreness (1-10)", 1, 10, int(curr_data.get('soreness', 1)),
+                             key=f"soreness_{st.session_state.selected_date}")
+        intensity = st.slider("Workout Intensity (1-10)", 1, 10, int(curr_data.get('intensity', 5)),
+                              key=f"intensity_{st.session_state.selected_date}")
         
-        if st.button("SAVE ACTIVITY", use_container_width=True):
+        if st.button("SAVE ACTIVITY", use_container_width=True, key="save_activity_btn"):
             composite_score = water + sleep_q + stress + soreness + intensity
             upsert_daily_log(user_id, st.session_state.selected_date, {
                 "water": water,
@@ -440,7 +479,6 @@ elif st.session_state.page == 'dashboard':
                 "intensity": intensity,
                 "activity_score": composite_score
             })
-            st.toast(f"Activity Logged for {st.session_state.selected_date.strftime('%b %d, %Y')}")
+            st.session_state.show_activity_success = True
             st.rerun()
         card_end()
-

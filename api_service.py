@@ -12,7 +12,6 @@ load_dotenv(dotenv_path=env_path)
 # but we'll check it here for error reporting.
 api_key = os.getenv("GEMINI_API_KEY")
 
-@st.cache_data
 def analyze_food(text):
     if not api_key:
         return {
@@ -44,12 +43,18 @@ def analyze_food(text):
         
         # New SDK syntax: client.models.generate_content
         response = client.models.generate_content(
-            model="gemini-3-flash-preview", 
+            model="gemini-2.0-flash",
             contents=prompt
         )
         
-        # Clean response text
-        response_text = response.text.strip().replace("```json", "").replace("```", "")
+        # Clean response text — strip markdown code fences if present
+        response_text = response.text.strip()
+        # Remove ```json ... ``` or ``` ... ``` wrappers
+        if response_text.startswith("```"):
+            lines = response_text.split("\n")
+            # Drop first and last lines if they are fence markers
+            lines = [l for l in lines if not l.strip().startswith("```")]
+            response_text = "\n".join(lines).strip()
         return json.loads(response_text)
     
     except Exception as e:
