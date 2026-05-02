@@ -251,7 +251,7 @@ def handle_profile(is_onboarding=False):
 def show_metrics_info():
     st.markdown("**Current BMI:** Body Mass Index is a simple measure of body fat based on your weight and height. Normal healthy values typically range between **18.5** and **24.9**.")
     st.markdown("**Total Kcal:** This is the total sum of the calorie intake you've logged today. General daily targets often sit around **2,000 kcal** for adult females and **2,500 kcal** for adult males, though your personal targets may vary.")
-    st.markdown("**Activity Score:** A cumulative snapshot of your daily logging habits. It simply adds up your manually tracked active parameters (Water in Liters, Sleep Quality, Stress, Muscle Soreness, and Workout Intensity) into a single holistic indicator.")
+    st.markdown("**Activity Score:** A cumulative snapshot of your daily logging habits. It simply adds up your manually tracked active parameters (Water in Liters, Sleep Quality, Stress, Muscle Soreness, Workout Intensity, and Skincare) into a single holistic indicator.")
 
 # ===========================================================================
 # PAGE ROUTING
@@ -586,16 +586,20 @@ elif st.session_state.page == 'dashboard':
         intensity = st.slider("Workout Intensity (1-10)", 1, 10,
                               int(curr_data.get('intensity', 5)),
                               key=f"intensity_{st.session_state.selected_date}")
+        skincare = st.slider("Skincare (1-10)", 1, 10,
+                             int(curr_data.get('skincare', 5)),
+                             key=f"skincare_{st.session_state.selected_date}")
 
         # ← Save ONLY on button click — slider moves are just local session state
         if st.button("SAVE ACTIVITY", use_container_width=True, key="save_activity_btn"):
-            composite_score = water + sleep_q + stress + soreness + intensity
+            composite_score = water + sleep_q + stress + soreness + intensity + skincare
             upsert_daily_log(user_id, st.session_state.selected_date, {
                 "water":          water,
                 "sleep_quality":  sleep_q,
                 "stress":         stress,
                 "soreness":       soreness,
                 "intensity":      intensity,
+                "skincare":       skincare,
                 "activity_score": composite_score
             })
             # Invalidate cache so Stats tab picks up fresh activity_score
